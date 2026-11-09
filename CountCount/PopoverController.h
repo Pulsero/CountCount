@@ -6,6 +6,7 @@
 - (void)popoverControllerDidClear:(PopoverController *)controller;
 - (void)popoverControllerDidQuit:(PopoverController *)controller;
 - (void)popoverControllerDidRequestSettings:(PopoverController *)controller;
+- (void)popoverControllerDidRequestHelp:(PopoverController *)controller;
 @end
 
 @interface PopoverController : NSViewController

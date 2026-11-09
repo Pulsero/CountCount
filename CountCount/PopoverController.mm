@@ -23,6 +23,7 @@ static NSTextField* CenteredLabel(NSFont* font, NSColor* color) {
 
 @implementation PopoverController {
     NSStackView* _stack;
+    NSTextField* _goalLabel;
     NSTextField* _kickerLabel;
     NSTextField* _headlineLabel;
     NSTextField* _unitLabel;
@@ -49,7 +50,16 @@ static NSTextField* CenteredLabel(NSFont* font, NSColor* color) {
 
     [_stack addArrangedSubview:[self headerRow]];
     [_stack setCustomSpacing:16 afterView:_stack.arrangedSubviews.lastObject];
+    NSTextField* goalCaption = CenteredLabel([NSFont systemFontOfSize:12 weight:NSFontWeightSemibold],
+                                             NSColor.secondaryLabelColor);
+    goalCaption.stringValue = @"Goal";
+    goalCaption.maximumNumberOfLines = 1;
+    _goalLabel = CenteredLabel([NSFont systemFontOfSize:20 weight:NSFontWeightSemibold], NSColor.labelColor);
     _kickerLabel = CenteredLabel([NSFont systemFontOfSize:13], NSColor.labelColor);
+    [_stack addArrangedSubview:goalCaption];
+    [_stack setCustomSpacing:2 afterView:goalCaption];
+    [_stack addArrangedSubview:_goalLabel];
+    [_stack setCustomSpacing:10 afterView:_goalLabel];
     _headlineLabel = CenteredLabel([NSFont monospacedDigitSystemFontOfSize:48 weight:NSFontWeightMedium],
                                    NSColor.labelColor);
     _headlineLabel.maximumNumberOfLines = 1;
@@ -117,6 +127,10 @@ static NSTextField* CenteredLabel(NSFont* font, NSColor* color) {
     quit.bezelStyle = NSBezelStyleRounded;
     quit.controlSize = NSControlSizeSmall;
 
+    NSButton* help = [NSButton buttonWithTitle:@"Help" target:self action:@selector(helpPressed:)];
+    help.bezelStyle = NSBezelStyleRounded;
+    help.controlSize = NSControlSizeSmall;
+
     _clearButton = [NSButton buttonWithTitle:@"Clear" target:self action:@selector(clearPressed:)];
     _clearButton.bezelStyle = NSBezelStyleRounded;
     _clearButton.controlSize = NSControlSizeSmall;
@@ -128,7 +142,7 @@ static NSTextField* CenteredLabel(NSFont* font, NSColor* color) {
     NSView* spacer = [[NSView alloc] initWithFrame:NSZeroRect];
     [spacer setContentHuggingPriority:NSLayoutPriorityDefaultLow
                         forOrientation:NSLayoutConstraintOrientationHorizontal];
-    NSStackView* row = [NSStackView stackViewWithViews:@[quit, spacer, _clearButton, _settingsButton]];
+    NSStackView* row = [NSStackView stackViewWithViews:@[quit, help, spacer, _clearButton, _settingsButton]];
     row.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     row.alignment = NSLayoutAttributeCenterY;
     row.spacing = 8;
@@ -174,13 +188,26 @@ static NSTextField* CenteredLabel(NSFont* font, NSColor* color) {
         event = stored;
     }
     const countcount::Presentation presentation = countcount::present(event, countcount::todayLocal());
+    NSString* goal = [_title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!_configured) {
+        _goalLabel.stringValue = @"Not set";
+        _goalLabel.textColor = NSColor.tertiaryLabelColor;
+    } else if (goal.length == 0) {
+        _goalLabel.stringValue = @"Untitled";
+        _goalLabel.textColor = NSColor.secondaryLabelColor;
+    } else {
+        _goalLabel.stringValue = goal;
+        _goalLabel.textColor = NSColor.labelColor;
+    }
     if (_message.length > 0) {
         _kickerLabel.stringValue = _message;
         _kickerLabel.textColor = NSColor.systemRedColor;
+        _kickerLabel.hidden = NO;
     } else {
-        _kickerLabel.stringValue = UTF8(presentation.kicker);
-        _kickerLabel.textColor = NSColor.labelColor;
+        _kickerLabel.stringValue = @"";
+        _kickerLabel.hidden = YES;
     }
+    _headlineLabel.hidden = !presentation.configured;
     _headlineLabel.stringValue = UTF8(presentation.headline);
     const BOOL compactNumber = _headlineLabel.stringValue.length >= 6;
     _headlineLabel.font = [NSFont monospacedDigitSystemFontOfSize:compactNumber ? 36 : 48
@@ -217,6 +244,11 @@ static NSTextField* CenteredLabel(NSFont* font, NSColor* color) {
 - (void)settingsPressed:(id)sender {
     (void)sender;
     [self.delegate popoverControllerDidRequestSettings:self];
+}
+
+- (void)helpPressed:(id)sender {
+    (void)sender;
+    [self.delegate popoverControllerDidRequestHelp:self];
 }
 
 - (void)clearPressed:(id)sender {

@@ -1,6 +1,7 @@
 #import "AppDelegate.h"
 
 #import "Countdown.hpp"
+#import "HelpController.h"
 #import "PopoverController.h"
 #import "SettingsController.h"
 
@@ -86,6 +87,7 @@ static NSImage* MenuBarIcon(void) {
     NSPopover* _popover;
     PopoverController* _controller;
     SettingsController* _settings;
+    HelpController* _help;
     NSTimer* _midnightTimer;
     NSImage* _menuIcon;
     id _outsideMonitor;
@@ -160,6 +162,16 @@ static NSImage* MenuBarIcon(void) {
     [appMenu addItem:quit];
     appItem.submenu = appMenu;
     [menuBar addItem:appItem];
+
+    NSMenuItem* helpItem = [[NSMenuItem alloc] init];
+    NSMenu* helpMenu = [[NSMenu alloc] initWithTitle:@"Help"];
+    NSMenuItem* help = [[NSMenuItem alloc] initWithTitle:@"CountCount Help"
+                                                  action:@selector(showHelp:)
+                                           keyEquivalent:@"?"];
+    help.target = self;
+    [helpMenu addItem:help];
+    helpItem.submenu = helpMenu;
+    [menuBar addItem:helpItem];
     NSApp.mainMenu = menuBar;
 }
 
@@ -464,6 +476,24 @@ static NSImage* MenuBarIcon(void) {
 - (void)popoverControllerDidRequestSettings:(PopoverController*)controller {
     (void)controller;
     [self showSettings:nil];
+}
+
+- (void)popoverControllerDidRequestHelp:(PopoverController*)controller {
+    (void)controller;
+    [self showHelp:nil];
+}
+
+- (void)showHelp:(id)sender {
+    (void)sender;
+    [self dismissExpandedInterface];
+    if (_help == nil) {
+        _help = [[HelpController alloc] init];
+    }
+    [NSApp activate];
+    _help.window.hidesOnDeactivate = NO;
+    [_help showWindow:self];
+    [_help.window orderFrontRegardless];
+    [_help.window makeKeyAndOrderFront:nil];
 }
 
 - (void)showSettings:(id)sender {
