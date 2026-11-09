@@ -3,7 +3,9 @@
 #include <cctype>
 #include <ctime>
 #include <fstream>
+#include <random>
 #include <system_error>
+#include <unordered_set>
 #include <utility>
 
 namespace countcount {
@@ -241,6 +243,18 @@ std::string escapeJson(const std::string& text) {
     return out;
 }
 
+bool isGoalId(const std::string& id) {
+    if (id.empty() || id.size() > 64) {
+        return false;
+    }
+    for (unsigned char c : id) {
+        if (!std::isalnum(c) && c != '-' && c != '_') {
+            return false;
+        }
+    }
+    return true;
+}
+
 class JsonParser {
 public:
     explicit JsonParser(std::string text) : text_(std::move(text)) {
@@ -305,7 +319,140 @@ public:
                isValidDate(event.date);
     }
 
+    bool parse(std::vector<Goal>& goals) {
+        goals.clear();
+        skip();
+        if (!consume('{')) {
+            return false;
+        }
+        bool sawGoals = false;
+        skip();
+        if (peek('}')) {
+            return false;
+        }
+        while (true) {
+            std::string key;
+            if (!parseString(key) || !consume(':')) {
+                return false;
+            }
+            if (key == "goals") {
+                if (sawGoals || !parseGoalArray(goals)) {
+                    return false;
+                }
+                sawGoals = true;
+            } else {
+                return false;
+            }
+            skip();
+            if (consume('}')) {
+                break;
+            }
+            if (!consume(',')) {
+                return false;
+            }
+        }
+        skip();
+        return index_ == text_.size() && sawGoals;
+    }
+
 private:
+    bool parseGoalArray(std::vector<Goal>& goals) {
+        if (!consume('[')) {
+            return false;
+        }
+        skip();
+        if (consume(']')) {
+            return true;
+        }
+        while (true) {
+            Goal goal;
+            if (!parseGoal(goal)) {
+                return false;
+            }
+            goals.push_back(std::move(goal));
+            if (goals.size() > 100) {
+                return false;
+            }
+            skip();
+            if (consume(']')) {
+                return true;
+            }
+            if (!consume(',')) {
+                return false;
+            }
+        }
+    }
+
+    bool parseGoal(Goal& goal) {
+        if (!consume('{')) {
+            return false;
+        }
+        bool sawId = false;
+        bool sawTitle = false;
+        bool sawDone = false;
+        skip();
+        if (peek('}')) {
+            return false;
+        }
+        while (true) {
+            std::string key;
+            if (!parseString(key) || !consume(':')) {
+                return false;
+            }
+            if (key == "id") {
+                if (sawId || !parseString(goal.id)) {
+                    return false;
+                }
+                sawId = true;
+            } else if (key == "title") {
+                if (sawTitle || !parseString(goal.title)) {
+                    return false;
+                }
+                sawTitle = true;
+            } else if (key == "done") {
+                if (sawDone || !parseBool(goal.done)) {
+                    return false;
+                }
+                sawDone = true;
+            } else {
+                return false;
+            }
+            skip();
+            if (consume('}')) {
+                break;
+            }
+            if (!consume(',')) {
+                return false;
+            }
+        }
+        goal.id = trim(goal.id);
+        goal.title = trim(goal.title);
+        return sawId && sawTitle && sawDone && isGoalId(goal.id) && !goal.title.empty();
+    }
+
+    bool parseBool(bool& out) {
+        skip();
+        if (text_.compare(index_, 4, "true") == 0 && !isIdChar(at(index_ + 4))) {
+            index_ += 4;
+            out = true;
+            return true;
+        }
+        if (text_.compare(index_, 5, "false") == 0 && !isIdChar(at(index_ + 5))) {
+            index_ += 5;
+            out = false;
+            return true;
+        }
+        return false;
+    }
+
+    char at(size_t index) const {
+        return index < text_.size() ? text_[index] : '\0';
+    }
+
+    static bool isIdChar(char c) {
+        const unsigned char value = static_cast<unsigned char>(c);
+        return std::isalnum(value) || c == '-' || c == '_';
+    }
     void skip() {
         while (index_ < text_.size() &&
                std::isspace(static_cast<unsigned char>(text_[index_]))) {
@@ -578,6 +725,121 @@ bool Store::save(const Event& event) const {
 bool Store::clear() const {
     std::error_code error;
     std::filesystem::remove(file_, error);
+    return !error;
+}
+
+std::string makeGoalId() {
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::random_device device;
+    std::uniform_int_distribution<int> dist(0, 15);
+    std::string id(16, '0');
+    for (char& character : id) {
+        character = kHex[dist(device)];
+    }
+    return id;
+}
+
+namespace {
+
+std::vector<Goal> normalizedGoals(const std::vector<Goal>& goals, bool& ok) {
+    ok = goals.size() <= 100;
+    std::vector<Goal> cleaned;
+    std::unordered_set<std::string> seen;
+    if (!ok) {
+        return cleaned;
+    }
+    cleaned.reserve(goals.size());
+    for (const Goal& goal : goals) {
+        Goal item;
+        item.id = trim(goal.id);
+        item.title = limitCodePoints(trim(goal.title), 80);
+        item.done = goal.done;
+        if (!isGoalId(item.id) || item.title.empty() || !seen.insert(item.id).second) {
+            ok = false;
+            return {};
+        }
+        cleaned.push_back(std::move(item));
+    }
+    return cleaned;
+}
+
+}  // namespace
+
+GoalStore::GoalStore(std::filesystem::path file) : file_(std::move(file)) {}
+
+std::optional<std::vector<Goal>> GoalStore::load() const {
+    std::error_code error;
+    const bool present = std::filesystem::exists(file_, error);
+    if (error) {
+        return std::nullopt;
+    }
+    if (!present) {
+        return std::vector<Goal> {};
+    }
+    std::ifstream input(file_, std::ios::binary);
+    if (!input) {
+        return std::nullopt;
+    }
+    std::string data((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    if (data.size() > 262144) {
+        return std::nullopt;
+    }
+    std::vector<Goal> goals;
+    JsonParser parser(std::move(data));
+    if (!parser.parse(goals)) {
+        return std::nullopt;
+    }
+    bool ok = false;
+    std::vector<Goal> cleaned = normalizedGoals(goals, ok);
+    if (!ok) {
+        return std::nullopt;
+    }
+    return cleaned;
+}
+
+bool GoalStore::save(const std::vector<Goal>& goals) const {
+    bool ok = false;
+    const std::vector<Goal> cleaned = normalizedGoals(goals, ok);
+    if (!ok) {
+        return false;
+    }
+    std::error_code error;
+    if (!file_.parent_path().empty()) {
+        std::filesystem::create_directories(file_.parent_path(), error);
+        if (error) {
+            return false;
+        }
+    }
+    std::string json = "{\n  \"goals\": [";
+    if (cleaned.empty()) {
+        json += "]\n}\n";
+    } else {
+        json += "\n";
+        for (size_t index = 0; index < cleaned.size(); ++index) {
+            const Goal& goal = cleaned[index];
+            json += "    {\n      \"id\": \"" + escapeJson(goal.id) + "\",\n      \"title\": \"" +
+                    escapeJson(goal.title) + "\",\n      \"done\": ";
+            json += goal.done ? "true" : "false";
+            json += "\n    }";
+            if (index + 1 < cleaned.size()) {
+                json += ",";
+            }
+            json += "\n";
+        }
+        json += "  ]\n}\n";
+    }
+    const std::filesystem::path temporary = file_.native() + ".tmp";
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output) {
+            return false;
+        }
+        output << json;
+        if (!output.good()) {
+            return false;
+        }
+    }
+    std::filesystem::rename(temporary, file_, error);
     return !error;
 }
 

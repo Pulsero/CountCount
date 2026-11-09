@@ -175,6 +175,58 @@ int main() {
     CHECK(!store.load().has_value());
     CHECK(store.clear());
 
+    GoalStore goals(directory / "goals.json");
+    const auto missingGoals = goals.load();
+    CHECK(missingGoals.has_value());
+    CHECK(missingGoals->empty());
+
+    const std::string firstId = makeGoalId();
+    const std::string secondId = makeGoalId();
+    CHECK(firstId.size() == 16);
+    CHECK(firstId != secondId);
+
+    std::vector<Goal> items(2);
+    items[0].id = firstId;
+    items[0].title = "  Ship the app  ";
+    items[0].done = false;
+    items[1].id = "goal-2";
+    items[1].title = "写文档";
+    items[1].done = true;
+    CHECK(goals.save(items));
+    const auto loadedGoals = goals.load();
+    CHECK(loadedGoals.has_value());
+    CHECK(loadedGoals->size() == 2);
+    CHECK((*loadedGoals)[0].id == firstId);
+    CHECK((*loadedGoals)[0].title == "Ship the app");
+    CHECK(!(*loadedGoals)[0].done);
+    CHECK((*loadedGoals)[1].id == "goal-2");
+    CHECK((*loadedGoals)[1].title == "写文档");
+    CHECK((*loadedGoals)[1].done);
+
+    items[0].title = "";
+    CHECK(!goals.save(items));
+    CHECK(goals.load()->size() == 2);
+
+    items[0].title = "Ship the app";
+    items[1].id = firstId;
+    CHECK(!goals.save(items));
+    CHECK((*goals.load())[1].id == "goal-2");
+
+    Goal clippedGoal;
+    clippedGoal.id = "clip";
+    clippedGoal.title = std::string(90, 'b');
+    CHECK(goals.save({clippedGoal}));
+    CHECK(goals.load()->at(0).title.size() == 80);
+
+    {
+        std::ofstream output(goals.path(), std::ios::binary | std::ios::trunc);
+        output << "{\"goals\":[{\"id\":\"bad\",\"title\":\"x\",\"done\":yes}]}";
+    }
+    CHECK(!goals.load().has_value());
+
+    CHECK(goals.save({}));
+    CHECK(goals.load()->empty());
+
     CHECK(isValidDate(todayLocal()));
 
     std::filesystem::remove_all(directory);

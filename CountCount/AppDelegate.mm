@@ -1,7 +1,7 @@
 #import "AppDelegate.h"
 
+#import "AboutController.h"
 #import "Countdown.hpp"
-#import "HelpController.h"
 #import "PopoverController.h"
 #import "SettingsController.h"
 
@@ -15,7 +15,7 @@ static NSString* UTF8(const std::string& text) {
     return [NSString stringWithUTF8String:text.c_str()] ?: @"";
 }
 
-static std::filesystem::path SupportFilePath() {
+static std::filesystem::path SupportDirectory() {
     NSFileManager* files = NSFileManager.defaultManager;
     NSURL* base = [files URLForDirectory:NSApplicationSupportDirectory
                                  inDomain:NSUserDomainMask
@@ -28,8 +28,45 @@ static std::filesystem::path SupportFilePath() {
     }
     NSString* folder = [root stringByAppendingPathComponent:@"CountCount"];
     [files createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:nil];
-    NSString* file = [folder stringByAppendingPathComponent:@"event.json"];
-    return std::filesystem::path(file.fileSystemRepresentation);
+    return std::filesystem::path(folder.fileSystemRepresentation);
+}
+
+static NSArray<NSDictionary*>* GoalArray(const std::vector<countcount::Goal>& goals) {
+    NSMutableArray<NSDictionary*>* items = [NSMutableArray arrayWithCapacity:goals.size()];
+    for (const countcount::Goal& goal : goals) {
+        [items addObject:@{
+            @"id" : UTF8(goal.id),
+            @"title" : UTF8(goal.title),
+            @"done" : @(goal.done),
+        }];
+    }
+    return items;
+}
+
+static std::optional<std::vector<countcount::Goal>> GoalsFromArray(NSArray<NSDictionary*>* items) {
+    if (items == nil) {
+        return std::nullopt;
+    }
+    std::vector<countcount::Goal> goals;
+    goals.reserve(items.count);
+    for (NSDictionary* item in items) {
+        if (![item isKindOfClass:NSDictionary.class]) {
+            return std::nullopt;
+        }
+        NSString* identifier = item[@"id"];
+        NSString* title = item[@"title"];
+        if (![identifier isKindOfClass:NSString.class] || ![title isKindOfClass:NSString.class]) {
+            return std::nullopt;
+        }
+        countcount::Goal goal;
+        const char* idUtf8 = identifier.UTF8String;
+        const char* titleUtf8 = title.UTF8String;
+        goal.id = idUtf8 ? std::string(idUtf8) : std::string();
+        goal.title = titleUtf8 ? std::string(titleUtf8) : std::string();
+        goal.done = [item[@"done"] boolValue];
+        goals.push_back(std::move(goal));
+    }
+    return goals;
 }
 
 static NSImage* MenuBarIcon(void) {
@@ -87,11 +124,12 @@ static NSImage* MenuBarIcon(void) {
     NSPopover* _popover;
     PopoverController* _controller;
     SettingsController* _settings;
-    HelpController* _help;
+    AboutController* _about;
     NSTimer* _midnightTimer;
     NSImage* _menuIcon;
     id _outsideMonitor;
     std::optional<countcount::Store> _store;
+    std::optional<countcount::GoalStore> _goalStore;
     BOOL _closingFromSession;
     CFAbsoluteTime _openedAt;
     CFAbsoluteTime _closedAt;
@@ -100,7 +138,9 @@ static NSImage* MenuBarIcon(void) {
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _store.emplace(SupportFilePath());
+        const std::filesystem::path support = SupportDirectory();
+        _store.emplace(support / "event.json");
+        _goalStore.emplace(support / "goals.json");
         [NSUserDefaults.standardUserDefaults registerDefaults:@{
             CountCountShowIconKey : @YES,
             CountCountShowTitleKey : @YES,
@@ -120,6 +160,7 @@ static NSImage* MenuBarIcon(void) {
     [self installMainMenu];
     [self installStatusItem];
     [self pushStoredEvent];
+    [self pushStoredGoals];
     [self reloadStatus];
     [self scheduleMidnightRefresh];
 
@@ -162,16 +203,6 @@ static NSImage* MenuBarIcon(void) {
     [appMenu addItem:quit];
     appItem.submenu = appMenu;
     [menuBar addItem:appItem];
-
-    NSMenuItem* helpItem = [[NSMenuItem alloc] init];
-    NSMenu* helpMenu = [[NSMenu alloc] initWithTitle:@"Help"];
-    NSMenuItem* help = [[NSMenuItem alloc] initWithTitle:@"CountCount Help"
-                                                  action:@selector(showHelp:)
-                                           keyEquivalent:@"?"];
-    help.target = self;
-    [helpMenu addItem:help];
-    helpItem.submenu = helpMenu;
-    [menuBar addItem:helpItem];
     NSApp.mainMenu = menuBar;
 }
 
@@ -220,6 +251,16 @@ static NSImage* MenuBarIcon(void) {
     }
     [_controller setCommittedTitle:title year:year month:month day:day configured:configured];
     [_settings applyTitle:title year:year month:month day:day configured:configured];
+}
+
+- (void)pushStoredGoals {
+    const std::optional<std::vector<countcount::Goal>> goals = _goalStore->load();
+    if (!goals) {
+        [_controller showGoalMessage:@"Couldn't read saved goals."];
+        return;
+    }
+    [_controller showGoalMessage:nil];
+    [_controller setGoals:GoalArray(*goals)];
 }
 
 - (void)reloadStatus {
@@ -478,22 +519,19 @@ static NSImage* MenuBarIcon(void) {
     [self showSettings:nil];
 }
 
-- (void)popoverControllerDidRequestHelp:(PopoverController*)controller {
+- (void)popoverControllerDidRequestAbout:(PopoverController*)controller {
     (void)controller;
-    [self showHelp:nil];
+    [self showAbout:nil];
 }
 
-- (void)showHelp:(id)sender {
-    (void)sender;
-    [self dismissExpandedInterface];
-    if (_help == nil) {
-        _help = [[HelpController alloc] init];
+- (BOOL)popoverController:(PopoverController*)controller didChangeGoals:(NSArray<NSDictionary*>*)goals {
+    const std::optional<std::vector<countcount::Goal>> parsed = GoalsFromArray(goals);
+    if (!parsed || !_goalStore->save(*parsed)) {
+        [controller showGoalMessage:@"Couldn't save goals."];
+        return NO;
     }
-    [NSApp activate];
-    _help.window.hidesOnDeactivate = NO;
-    [_help showWindow:self];
-    [_help.window orderFrontRegardless];
-    [_help.window makeKeyAndOrderFront:nil];
+    [self pushStoredGoals];
+    return YES;
 }
 
 - (void)showSettings:(id)sender {
@@ -513,10 +551,14 @@ static NSImage* MenuBarIcon(void) {
 - (void)showAbout:(id)sender {
     (void)sender;
     [self dismissExpandedInterface];
+    if (_about == nil) {
+        _about = [[AboutController alloc] init];
+    }
     [NSApp activate];
-    NSAttributedString* credits =
-        [[NSAttributedString alloc] initWithString:@"Counts the days until a date, in the menu bar."];
-    [NSApp orderFrontStandardAboutPanelWithOptions:@{NSAboutPanelOptionCredits : credits}];
+    _about.window.hidesOnDeactivate = NO;
+    [_about showWindow:self];
+    [_about.window orderFrontRegardless];
+    [_about.window makeKeyAndOrderFront:nil];
 }
 
 @end

@@ -98,7 +98,7 @@ static BOOL SameDay(NSCalendar* calendar, NSDate* lhs, NSDate* rhs) {
     stack.detachesHiddenViews = YES;
     stack.translatesAutoresizingMaskIntoConstraints = NO;
 
-    NSTextField* nameCaption = Caption(@"Goal");
+    NSTextField* nameCaption = Caption(@"Event name");
     [stack addArrangedSubview:nameCaption];
     [stack setCustomSpacing:4 afterView:nameCaption];
     _titleField = [NSTextField textFieldWithString:@""];
@@ -150,7 +150,7 @@ static BOOL SameDay(NSCalendar* calendar, NSDate* lhs, NSDate* rhs) {
     [stack addArrangedSubview:menuCaption];
     [stack setCustomSpacing:4 afterView:menuCaption];
     _showIconCheckbox = [NSButton checkboxWithTitle:@"Show icon" target:self action:@selector(displayChanged:)];
-    _showTitleCheckbox = [NSButton checkboxWithTitle:@"Show goal name"
+    _showTitleCheckbox = [NSButton checkboxWithTitle:@"Show event name"
                                               target:self
                                               action:@selector(displayChanged:)];
     [stack addArrangedSubview:_showIconCheckbox];

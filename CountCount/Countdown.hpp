@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace countcount {
 
@@ -48,6 +49,32 @@ public:
     std::optional<Event> load() const;
     bool save(const Event& event) const;
     bool clear() const;
+
+    const std::filesystem::path& path() const { return file_; }
+
+private:
+    std::filesystem::path file_;
+};
+
+struct Goal {
+    std::string id;
+    std::string title;
+    bool done = false;
+
+    friend bool operator==(const Goal& a, const Goal& b) {
+        return a.id == b.id && a.title == b.title && a.done == b.done;
+    }
+};
+
+std::string makeGoalId();
+
+class GoalStore {
+public:
+    explicit GoalStore(std::filesystem::path file);
+
+    // An empty vector when the file is absent. nullopt when the file cannot be read.
+    std::optional<std::vector<Goal>> load() const;
+    bool save(const std::vector<Goal>& goals) const;
 
     const std::filesystem::path& path() const { return file_; }
 
